@@ -59,6 +59,7 @@ public class UIManager : MonoBehaviour
   [SerializeField] private AudioController audioController;
   [SerializeField] private SlotBehaviour slotManager;
   [SerializeField] private SocketIOManager socketManager;
+  [SerializeField] private JSFunctCalls jsFunctCalls;
 
   [Header("Reconnection popup")]
   [SerializeField] private GameObject ReconnectPopup_Object;
@@ -98,6 +99,20 @@ public class UIManager : MonoBehaviour
   [SerializeField] private Button SkipWinAnimation;
   [SerializeField] private Button SkipJackpotAnimation;
 
+
+  private void Awake()
+  {
+    if (jsFunctCalls != null)
+      jsFunctCalls.RegisterVisibilityListener(gameObject.name);
+  }
+
+  public void OnFocusChanged(string value)
+  {
+    bool focused = value == "1";
+    Debug.Log("UNITY FOCUS CHANGED: " + value + " (focused: " + focused + ")");
+    audioController?.SetMuteAll(!focused);
+    socketManager?.HandleFocusChange(focused);
+  }
 
   private void Start()
   {

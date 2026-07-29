@@ -43,11 +43,70 @@ public class SocketIOManager : MonoBehaviour
   private const int MaxMissedPongs = 5;
   private Coroutine PingRoutine; //Back2 end
 
+  private bool hasFocus = true;
+  private float focusLostTime = 0f;
+  private Coroutine focusCheckRoutine;
+  private readonly float maxBackgroundTime = 60f;
+  private bool isExiting = false;
+  private bool isBeingDestroyed = false;
+
   private void Awake()
   {
     isLoading = true;
     SetInit = false;
     // Debug.unityLogger.logEnabled = false;
+  }
+
+  private void OnDestroy()
+  {
+    isBeingDestroyed = true;
+  }
+
+  internal void HandleFocusChange(bool focus)
+  {
+    hasFocus = focus;
+
+    if (!focus)
+    {
+      focusLostTime = Time.time;
+      if (focusCheckRoutine == null && !isExiting && !isBeingDestroyed)
+        focusCheckRoutine = StartCoroutine(FocusTimeoutCheck());
+    }
+    else
+    {
+      if (focusCheckRoutine != null)
+      {
+        StopCoroutine(focusCheckRoutine);
+        focusCheckRoutine = null;
+      }
+    }
+  }
+
+  private IEnumerator FocusTimeoutCheck()
+  {
+    while (!hasFocus && !isExiting && !isBeingDestroyed)
+    {
+      if (Time.time - focusLostTime >= maxBackgroundTime)
+      {
+        Debug.LogWarning("[SOCKET] Background timeout — closing connection");
+        isConnected = false;
+        ResetPingRoutine();
+
+        if (manager != null)
+        {
+          try { manager.Close(); }
+          catch (Exception e) { Debug.LogWarning($"[SOCKET] Focus close error: {e.Message}"); }
+        }
+
+        uIManager.DisconnectionPopup();
+        focusCheckRoutine = null;
+        yield break;
+      }
+
+      yield return new WaitForSecondsRealtime(1f);
+    }
+
+    focusCheckRoutine = null;
   }
 
   private void Start()
@@ -143,6 +202,7 @@ public class SocketIOManager : MonoBehaviour
     gameSocket.On<string>("internalError", OnSocketError);
     gameSocket.On<string>("alert", OnSocketAlert);
     gameSocket.On<string>("AnotherDevice", OnSocketOtherDevice);
+    gameSocket.On<string>("balance:sync", OnBalanceSync);
 
     manager.Open();
   }
@@ -242,6 +302,17 @@ public class SocketIOManager : MonoBehaviour
     uIManager.ADfunction();
   }
 
+  private void OnBalanceSync(string data)
+  {
+    BalanceSyncPayload syncPayload = JsonConvert.DeserializeObject<BalanceSyncPayload>(data);
+    if (syncPayload == null) return;
+
+    if (playerData == null) playerData = new Player();
+    playerData.balance = syncPayload.balance;
+
+    slotManager.UpdateBalanceDisplay(syncPayload.balance);
+  }
+
   void CloseGame()
   {
     Debug.Log("Unity: Closing Game");
@@ -250,6 +321,7 @@ public class SocketIOManager : MonoBehaviour
 
   internal IEnumerator CloseSocket() //Back2 Start
   {
+    isExiting = true;
     RaycastBlocker.SetActive(true);
     ResetPingRoutine();
 
@@ -513,6 +585,12 @@ public class UiData
 
 [Serializable]
 public class Player
+{
+  public double balance;
+}
+
+[Serializable]
+public class BalanceSyncPayload
 {
   public double balance;
 }

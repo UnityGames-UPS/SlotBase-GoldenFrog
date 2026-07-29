@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public class AudioController : MonoBehaviour
@@ -14,9 +15,14 @@ public class AudioController : MonoBehaviour
   [SerializeField] private AudioClip Win_Audio;
   [SerializeField] private AudioClip NormalBg_Audio;
 
+  private List<AudioSource> focusManagedSources;
+  private readonly Dictionary<AudioSource, bool> preFocusMuteState = new Dictionary<AudioSource, bool>();
+  private bool isForceMuted = false;
+
   private void Awake()
   {
     playBgAudio();
+    focusManagedSources = new List<AudioSource> { bg_adudio, audioPlayer_wl, audioPlayer_button, audioPlayer_Spin };
   }
 
   internal void PlayWLAudio(string type)
@@ -48,27 +54,34 @@ public class AudioController : MonoBehaviour
 
   internal void CheckFocusFunction(bool focus, bool IsSpinning)
   {
-    if (!focus)
+    SetMuteAll(!focus);
+    if (focus && !IsSpinning)
     {
-      bg_adudio.Pause();
-      audioPlayer_wl.Pause();
-      audioPlayer_button.Pause();
-      audioPlayer_Spin.Pause();
+      StopWLAudio();
+      audioPlayer_Spin.Stop();
     }
-    else
+  }
+
+  // Focus-driven — called from both the WebGL/JS OnFocusChanged path and OnApplicationFocus.
+  // Never force-unmutes: on regained focus, each source is restored to whatever .mute it had
+  // right before it was force-muted (i.e. the user's real setting), never a hardcoded false.
+  internal void SetMuteAll(bool forceMute)
+  {
+    if (forceMute == isForceMuted) return;
+    isForceMuted = forceMute;
+
+    foreach (var source in focusManagedSources)
     {
-      if (!bg_adudio.mute) bg_adudio.UnPause();
-      if (IsSpinning)
+      if (source == null) continue;
+      if (forceMute)
       {
-        if (!audioPlayer_wl.mute) audioPlayer_wl.UnPause();
-        audioPlayer_Spin.UnPause();
+        preFocusMuteState[source] = source.mute;
+        source.mute = true;
       }
       else
       {
-        StopWLAudio();
-        audioPlayer_Spin.Stop();
+        source.mute = preFocusMuteState.TryGetValue(source, out bool prevMuted) ? prevMuted : source.mute;
       }
-      if (!audioPlayer_button.mute) audioPlayer_button.UnPause();
     }
   }
 
@@ -113,20 +126,30 @@ public class AudioController : MonoBehaviour
     switch (type)
     {
       case "bg":
-        bg_adudio.mute = toggle;
+        SetSourceMute(bg_adudio, toggle);
         break;
       case "button":
-        audioPlayer_button.mute = toggle;
-        audioPlayer_Spin.mute = toggle;
+        SetSourceMute(audioPlayer_button, toggle);
+        SetSourceMute(audioPlayer_Spin, toggle);
         break;
       case "wl":
-        audioPlayer_wl.mute = toggle;
+        SetSourceMute(audioPlayer_wl, toggle);
         break;
       case "all":
-        audioPlayer_wl.mute = toggle;
-        bg_adudio.mute = toggle;
-        audioPlayer_button.mute = toggle;
+        SetSourceMute(audioPlayer_wl, toggle);
+        SetSourceMute(bg_adudio, toggle);
+        SetSourceMute(audioPlayer_button, toggle);
         break;
     }
+  }
+
+  // The user's own mute/unmute control always wins immediately: it writes .mute directly
+  // (not layered behind isForceMuted), and also updates the stored pre-focus value so a
+  // later focus-regain restore doesn't clobber this newer choice.
+  private void SetSourceMute(AudioSource source, bool mute)
+  {
+    if (source == null) return;
+    source.mute = mute;
+    if (isForceMuted) preFocusMuteState[source] = mute;
   }
 }
